@@ -31,9 +31,36 @@ jobs:
           # Skip code-signing/notarization — personal/unsigned build.
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
-      - name: Upload .dmg
+      - name: Upload .dmg (workflow artifact)
         uses: actions/upload-artifact@v4
         with:
           name: opencraft-recorder-mac
           path: dist/*.dmg
           if-no-files-found: error
+
+      # Publish to a public Supabase Storage bucket under a STABLE name, so the
+      # web app's "Download for macOS" button always points at the latest build.
+      - name: Publish .dmg to Supabase Storage
+        env:
+          SUPABASE_URL: https://wdzmuniyqqyngzckeoph.supabase.co
+          SUPABASE_BUCKET: downloads
+          SUPABASE_OBJECT: opencraft-recorder-mac-arm64.dmg
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          set -euo pipefail
+          DMG=$(ls dist/*.dmg | head -n1)
+          echo "Uploading $DMG ($(du -h "$DMG" | cut -f1)) → $SUPABASE_BUCKET/$SUPABASE_OBJECT"
+          code=$(curl -sS -w '%{http_code}' -o /tmp/upload_resp.json \
+            -X POST \
+            "$SUPABASE_URL/storage/v1/object/$SUPABASE_BUCKET/$SUPABASE_OBJECT" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "x-upsert: true" \
+            -H "Content-Type: application/x-apple-diskimage" \
+            --data-binary "@$DMG")
+          echo "HTTP $code"; cat /tmp/upload_resp.json || true; echo
+          if [ "$code" -ge 300 ]; then
+            echo "::error::Supabase upload failed ($code). If 413, raise the project's storage upload size limit to >=100MB (Dashboard → Project Settings → Storage)."
+            exit 1
+          fi
+          echo "Public URL: $SUPABASE_URL/storage/v1/object/public/$SUPABASE_BUCKET/$SUPABASE_OBJECT"
