@@ -1,0 +1,20 @@
+appId: com.opencraft.recorder
+productName: OpenCraft Recorder
+directories:
+  output: dist
+  buildResources: build
+files:
+  - out/**
+  - "!**/*.map"
+mac:
+  target:
+    - dmg
+  category: public.app-category.productivity
+  # Unsigned local/personal build — first launch needs right-click → Open.
+  identity: null
+  extendInfo:
+    NSCameraUsageDescription: Used to record your webcam into tutorials.
+    NSMicrophoneUsageDescription: Used to record your narration.
+    NSScreenCaptureUsageDescription: Used to record your screen.
+dmg:
+  title: OpenCraft Recorder
