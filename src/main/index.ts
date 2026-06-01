@@ -40,7 +40,7 @@ function createMainWindow(): void {
     height: 760,
     show: false,
     title: "OpenCraft Recorder",
-    backgroundColor: "#16181c",
+    backgroundColor: "#F0F4F9",
     webPreferences: { preload: PRELOAD, sandbox: false },
   });
   // The control/script/setup window is itself content-protected so it can stay
