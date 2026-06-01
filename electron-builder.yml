@@ -6,6 +6,12 @@ directories:
 files:
   - out/**
   - "!**/*.map"
+# Register the custom URL scheme so the OS can launch the app from the web
+# (opencraft-recorder://record).
+protocols:
+  - name: OpenCraft Recorder
+    schemes:
+      - opencraft-recorder
 mac:
   target:
     - dmg

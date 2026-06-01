@@ -127,15 +127,68 @@ ipcMain.handle("save-recording", async (_e, data: ArrayBuffer, suggestedName: st
   return { saved: true as const, filePath };
 });
 
+// ── deep linking (web → app) ─────────────────────────────────────────────────
+// The web app's "Set up recording" button opens opencraft-recorder://record.
+// Registering the scheme lets the OS launch (or focus) this app from that link.
+
+const DEEP_LINK_SCHEME = "opencraft-recorder";
+let pendingDeepLink: string | null = null;
+
+function focusMain(): void {
+  if (mainWin && !mainWin.isDestroyed()) {
+    if (mainWin.isMinimized()) mainWin.restore();
+    mainWin.show();
+    mainWin.focus();
+  } else {
+    createMainWindow();
+  }
+}
+
+function handleDeepLink(url: string): void {
+  // App fully up → tell the renderer; otherwise stash until the window exists.
+  if (mainWin && !mainWin.isDestroyed() && !mainWin.webContents.isLoading()) {
+    mainWin.webContents.send("deep-link", url);
+  } else {
+    pendingDeepLink = url;
+  }
+  focusMain();
+}
+
 // ── lifecycle ────────────────────────────────────────────────────────────────
 
-app.whenReady().then(() => {
-  createMainWindow();
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
+// A single instance: a second launch (e.g. from a deep link while already
+// running) focuses the existing window instead of spawning another app.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on("second-instance", (_e, argv) => {
+    // Windows/Linux deliver the deep link as a command-line argument.
+    const url = argv.find((a) => a.startsWith(`${DEEP_LINK_SCHEME}://`));
+    if (url) handleDeepLink(url);
+    else focusMain();
   });
-});
 
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
-});
+  // macOS delivers the deep link through this event.
+  app.on("open-url", (event, url) => {
+    event.preventDefault();
+    handleDeepLink(url);
+  });
+
+  app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME);
+
+  app.whenReady().then(() => {
+    createMainWindow();
+    if (pendingDeepLink) {
+      const url = pendingDeepLink;
+      pendingDeepLink = null;
+      mainWin?.webContents.once("did-finish-load", () => handleDeepLink(url));
+    }
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
+    });
+  });
+
+  app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") app.quit();
+  });
+}
