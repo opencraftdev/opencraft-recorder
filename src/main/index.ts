@@ -57,11 +57,14 @@ function createOnboardingWindow(): void {
 // A frameless, dark-frosted ("spotlight") popup: translucent vibrancy, rounded,
 // always-on-top, content-protected (never recorded), draggable + resizable.
 //
-// type: "panel" makes the window an NSPanel rather than a standard NSWindow. To
-// macOS its AX subrole is no longer "AXStandardWindow", so tiling window managers
-// (AeroSpace, yabai) leave it floating instead of slotting it into the tiling
-// grid — these popups behave like true overlays (position: absolute), not tiled
-// app windows. (This is the same approach Screen Studio uses for its overlays.)
+// To make these float like a Superwhisper-style overlay (instead of being tiled
+// by AeroSpace/yabai) we lean on two things together:
+//   1. type: "panel" → the window is an NSPanel, not a standard NSWindow.
+//   2. the whole app runs as an "accessory" (no Dock icon / not in Cmd-Tab — see
+//      app.whenReady below) and the panel is shown WITHOUT activating it.
+// A non-activating panel from an accessory app is exactly what Superwhisper's pill
+// is: tiling managers don't consider it a tileable app window, so it stays
+// floating — a true overlay (position: absolute), never slotted into the grid.
 function createPopup(route: string, b: { x: number; y: number; width: number; height: number }): BrowserWindow {
   const win = new BrowserWindow({
     x: b.x,
@@ -87,7 +90,9 @@ function createPopup(route: string, b: { x: number; y: number; width: number; he
   win.setContentProtection(true);
   win.setAlwaysOnTop(true, "screen-saver");
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  win.on("ready-to-show", () => win.show());
+  // showInactive: appear without stealing focus — a non-activating overlay, not a
+  // window the user (or the tiling WM) "switches to".
+  win.on("ready-to-show", () => win.showInactive());
   loadRoute(win, route);
   return win;
 }
@@ -98,6 +103,12 @@ function createPopup(route: string, b: { x: number; y: number; width: number; he
 // stacked top-right; small control lower-right), then hide onboarding.
 ipcMain.handle("start-session", () => {
   if (sessionWindows().length) return;
+  // Become a background "accessory" app for the duration of the session: no Dock
+  // icon, not in Cmd-Tab. This is the other half of the Superwhisper trick — a
+  // tiling WM (AeroSpace/yabai) won't treat an accessory app's panels as tileable
+  // app windows, so the overlays stay floating instead of being slotted into the
+  // grid. Restored to "regular" in end-session.
+  if (process.platform === "darwin") app.setActivationPolicy("accessory");
   const wa = screen.getPrimaryDisplay().workArea;
   const W = wa.width;
   const H = wa.height;
@@ -141,6 +152,11 @@ ipcMain.handle("start-session", () => {
 ipcMain.handle("end-session", () => {
   for (const w of sessionWindows()) w.close();
   (Object.keys(session) as SessionKey[]).forEach((k) => (session[k] = undefined));
+  // Back to a normal foreground app so onboarding has a Dock icon and takes focus.
+  if (process.platform === "darwin") {
+    app.setActivationPolicy("regular");
+    app.focus({ steal: true });
+  }
   createOnboardingWindow();
 });
 
