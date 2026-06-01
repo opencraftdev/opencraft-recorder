@@ -56,6 +56,12 @@ function createOnboardingWindow(): void {
 
 // A frameless, dark-frosted ("spotlight") popup: translucent vibrancy, rounded,
 // always-on-top, content-protected (never recorded), draggable + resizable.
+//
+// type: "panel" makes the window an NSPanel rather than a standard NSWindow. To
+// macOS its AX subrole is no longer "AXStandardWindow", so tiling window managers
+// (AeroSpace, yabai) leave it floating instead of slotting it into the tiling
+// grid — these popups behave like true overlays (position: absolute), not tiled
+// app windows. (This is the same approach Screen Studio uses for its overlays.)
 function createPopup(route: string, b: { x: number; y: number; width: number; height: number }): BrowserWindow {
   const win = new BrowserWindow({
     x: b.x,
@@ -64,6 +70,7 @@ function createPopup(route: string, b: { x: number; y: number; width: number; he
     height: b.height,
     show: false,
     frame: false,
+    type: process.platform === "darwin" ? "panel" : undefined,
     resizable: true,
     movable: true,
     minWidth: 90,
