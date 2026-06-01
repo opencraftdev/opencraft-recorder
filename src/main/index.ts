@@ -14,123 +14,167 @@ import { writeFile } from "fs/promises";
 // The native superpower this whole app exists for: setContentProtection(true)
 // flags a window with the OS "exclude from capture" bit (NSWindowSharingNone on
 // macOS, WDA_EXCLUDEFROMCAPTURE on Windows 11). The window stays fully visible on
-// screen but is INVISIBLE to any screen recording — including a full-screen
-// capture of any other app. That's what lets the floating popups never appear in
-// the take, the thing the browser could never guarantee.
-
-let mainWin: BrowserWindow | null = null;
-let cameraWin: BrowserWindow | null = null;
+// screen but is INVISIBLE to any screen recording. Every floating popup below is
+// content-protected, so none of them appear in the take.
 
 const PRELOAD = join(__dirname, "../preload/index.js");
 
-// In dev, electron-vite serves the renderer; in prod we load the built file.
-// Each window renders a different route, chosen via the URL hash.
+// The light onboarding window (permissions) shown before a session.
+let onboardingWin: BrowserWindow | null = null;
+
+// The four floating "spotlight" popups that make up a recording session.
+type SessionKey = "brief" | "screen" | "camera" | "control";
+const session: Partial<Record<SessionKey, BrowserWindow>> = {};
+const sessionWindows = (): BrowserWindow[] =>
+  (Object.values(session).filter((w): w is BrowserWindow => !!w && !w.isDestroyed()));
+
 function loadRoute(win: BrowserWindow, hash: string): void {
   const devUrl = process.env["ELECTRON_RENDERER_URL"];
-  if (devUrl) {
-    void win.loadURL(`${devUrl}#${hash}`);
-  } else {
-    void win.loadFile(join(__dirname, "../renderer/index.html"), { hash });
-  }
+  if (devUrl) void win.loadURL(`${devUrl}#${hash}`);
+  else void win.loadFile(join(__dirname, "../renderer/index.html"), { hash });
 }
 
-function createMainWindow(): void {
-  mainWin = new BrowserWindow({
-    width: 440,
-    height: 760,
+function createOnboardingWindow(): void {
+  if (onboardingWin && !onboardingWin.isDestroyed()) {
+    onboardingWin.show();
+    onboardingWin.focus();
+    return;
+  }
+  onboardingWin = new BrowserWindow({
+    width: 460,
+    height: 600,
     show: false,
     title: "OpenCraft Recorder",
     backgroundColor: "#F0F4F9",
     webPreferences: { preload: PRELOAD, sandbox: false },
   });
-  // The control/script/setup window is itself content-protected so it can stay
-  // open and readable during a full-screen take without being recorded.
-  mainWin.setContentProtection(true);
-  mainWin.on("ready-to-show", () => mainWin?.show());
-  mainWin.on("closed", () => {
-    mainWin = null;
-    cameraWin?.close();
-  });
-  loadRoute(mainWin, "/main");
+  onboardingWin.setContentProtection(true);
+  onboardingWin.on("ready-to-show", () => onboardingWin?.show());
+  onboardingWin.on("closed", () => (onboardingWin = null));
+  loadRoute(onboardingWin, "/onboarding");
 }
 
-function createCameraWindow(): void {
-  if (cameraWin && !cameraWin.isDestroyed()) {
-    cameraWin.focus();
-    return;
-  }
-  cameraWin = new BrowserWindow({
-    width: 220,
-    height: 220,
+// A frameless, dark-frosted ("spotlight") popup: translucent vibrancy, rounded,
+// always-on-top, content-protected (never recorded), draggable + resizable.
+function createPopup(route: string, b: { x: number; y: number; width: number; height: number }): BrowserWindow {
+  const win = new BrowserWindow({
+    x: b.x,
+    y: b.y,
+    width: b.width,
+    height: b.height,
     show: false,
     frame: false,
-    transparent: true,
-    resizable: false,
-    hasShadow: false,
+    resizable: true,
+    movable: true,
+    minWidth: 90,
+    minHeight: 90,
+    hasShadow: true,
     alwaysOnTop: true,
     skipTaskbar: true,
+    roundedCorners: true,
+    vibrancy: "hud", // macOS dark frosted material — the Spotlight look
+    visualEffectState: "active",
+    backgroundColor: "#00000000",
     webPreferences: { preload: PRELOAD, sandbox: false },
   });
-  cameraWin.setContentProtection(true);
-  // Float above full-screen apps too.
-  cameraWin.setAlwaysOnTop(true, "screen-saver");
-  cameraWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  cameraWin.on("ready-to-show", () => cameraWin?.show());
-  cameraWin.on("closed", () => {
-    cameraWin = null;
-    mainWin?.webContents.send("camera-window-closed");
-  });
-  loadRoute(cameraWin, "/camera");
+  win.setContentProtection(true);
+  win.setAlwaysOnTop(true, "screen-saver");
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  win.on("ready-to-show", () => win.show());
+  loadRoute(win, route);
+  return win;
 }
 
-// ── IPC ──────────────────────────────────────────────────────────────────────
+// ── session lifecycle ────────────────────────────────────────────────────────
 
-// Available screens + windows to capture (desktopCapturer is main-process only).
-// For screens we also return the display bounds so the renderer can map the
-// global cursor position into 0..1 for cursor-follow auto-zoom.
-ipcMain.handle("get-sources", async () => {
-  const sources = await desktopCapturer.getSources({
-    types: ["screen", "window"],
-    thumbnailSize: { width: 320, height: 180 },
+// Spawn the four popups laid out like the design (brief left; screen + camera
+// stacked top-right; small control lower-right), then hide onboarding.
+ipcMain.handle("start-session", () => {
+  if (sessionWindows().length) return;
+  const wa = screen.getPrimaryDisplay().workArea;
+  const W = wa.width;
+  const H = wa.height;
+  const rightX = wa.x + W - 250;
+
+  session.brief = createPopup("/brief", {
+    x: wa.x + 40,
+    y: wa.y + Math.round(H * 0.14),
+    width: 210,
+    height: 300,
   });
-  const displays = screen.getAllDisplays();
-  return sources.map((s) => {
-    const display =
-      s.display_id !== ""
-        ? displays.find((d) => String(d.id) === String(s.display_id))
-        : undefined;
-    return {
-      id: s.id,
-      name: s.name,
-      kind: s.id.startsWith("screen") ? "screen" : "window",
-      thumbnail: s.thumbnail.toDataURL(),
-      displayBounds: display ? display.bounds : null,
-    };
+  session.screen = createPopup("/screen", {
+    x: rightX,
+    y: wa.y + Math.round(H * 0.1),
+    width: 220,
+    height: 150,
   });
+  session.camera = createPopup("/camera", {
+    x: rightX,
+    y: wa.y + Math.round(H * 0.1) + 165,
+    width: 220,
+    height: 150,
+  });
+  session.control = createPopup("/control", {
+    x: wa.x + W - 150,
+    y: wa.y + Math.round(H * 0.52),
+    width: 120,
+    height: 230,
+  });
+
+  (Object.keys(session) as SessionKey[]).forEach((k) => {
+    session[k]?.on("closed", () => {
+      session[k] = undefined;
+    });
+  });
+
+  onboardingWin?.hide();
 });
 
-// Current global cursor position + the bounds of the display it's on.
+// Close the popups and return to onboarding.
+ipcMain.handle("end-session", () => {
+  for (const w of sessionWindows()) w.close();
+  (Object.keys(session) as SessionKey[]).forEach((k) => (session[k] = undefined));
+  createOnboardingWindow();
+});
+
+// The primary display as a capture source (+ its bounds for cursor-follow zoom).
+ipcMain.handle("get-primary-source", async () => {
+  const primary = screen.getPrimaryDisplay();
+  const sources = await desktopCapturer.getSources({
+    types: ["screen"],
+    thumbnailSize: { width: 1, height: 1 },
+  });
+  const match = sources.find((s) => String(s.display_id) === String(primary.id)) ?? sources[0];
+  if (!match) return null;
+  return { id: match.id, displayBounds: primary.bounds };
+});
+
+// Broadcast bus: any window posts a message, every other window receives it.
+// Carries control commands (record/pause/stop) and engine state (phase/elapsed).
+ipcMain.on("bus", (e, msg) => {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed() && w.webContents.id !== e.sender.id) w.webContents.send("bus", msg);
+  }
+});
+
+// ── IPC: capture helpers ─────────────────────────────────────────────────────
+
 ipcMain.handle("get-cursor", () => {
   const point = screen.getCursorScreenPoint();
   const display = screen.getDisplayNearestPoint(point);
   return { x: point.x, y: point.y, bounds: display.bounds };
 });
 
-ipcMain.handle("open-camera", () => {
-  createCameraWindow();
-});
-
-ipcMain.handle("close-camera", () => {
-  if (cameraWin && !cameraWin.isDestroyed()) cameraWin.close();
-});
-
-// Persist a finished recording to disk via a native Save dialog.
-ipcMain.handle("save-recording", async (_e, data: ArrayBuffer, suggestedName: string) => {
-  const { canceled, filePath } = await dialog.showSaveDialog(mainWin ?? undefined!, {
+ipcMain.handle("save-recording", async (e, data: ArrayBuffer, suggestedName: string) => {
+  const parent = BrowserWindow.fromWebContents(e.sender) ?? undefined;
+  const opts = {
     title: "Save recording",
     defaultPath: suggestedName,
     filters: [{ name: "WebM video", extensions: ["webm"] }],
-  });
+  };
+  const { canceled, filePath } = parent
+    ? await dialog.showSaveDialog(parent, opts)
+    : await dialog.showSaveDialog(opts);
   if (canceled || !filePath) return { saved: false as const };
   await writeFile(filePath, Buffer.from(data));
   return { saved: true as const, filePath };
@@ -138,7 +182,6 @@ ipcMain.handle("save-recording", async (_e, data: ArrayBuffer, suggestedName: st
 
 // ── onboarding: macOS privacy permissions ───────────────────────────────────
 
-// Live status of the permissions we need. On non-macOS there's nothing to grant.
 ipcMain.handle("get-permissions", () => {
   if (process.platform !== "darwin") {
     return { camera: "granted", microphone: "granted", screen: "granted" };
@@ -150,7 +193,6 @@ ipcMain.handle("get-permissions", () => {
   };
 });
 
-// Camera + mic can be requested with a native prompt directly.
 ipcMain.handle("request-camera-mic", async () => {
   if (process.platform !== "darwin") return true;
   const cam = await systemPreferences.askForMediaAccess("camera");
@@ -158,8 +200,6 @@ ipcMain.handle("request-camera-mic", async () => {
   return cam && mic;
 });
 
-// Screen Recording can't be requested via a prompt — poke the OS so the app is
-// listed, then open the Screen Recording settings pane for the user to toggle.
 ipcMain.handle("open-screen-settings", () => {
   if (process.platform !== "darwin") return;
   desktopCapturer
@@ -170,70 +210,55 @@ ipcMain.handle("open-screen-settings", () => {
   );
 });
 
-// Screen Recording only takes effect after a relaunch — offer a one-click restart.
 ipcMain.handle("relaunch-app", () => {
   app.relaunch();
   app.exit(0);
 });
 
 // ── deep linking (web → app) ─────────────────────────────────────────────────
-// The web app's "Set up recording" button opens opencraft-recorder://record.
-// Registering the scheme lets the OS launch (or focus) this app from that link.
 
 const DEEP_LINK_SCHEME = "opencraft-recorder";
 let pendingDeepLink: string | null = null;
 let lastDeepLink: string | null = null;
 
-// The renderer reads the launch deep link on mount (covers the case where the
-// 'deep-link' push races the renderer subscribing).
 ipcMain.handle("get-initial-deep-link", () => lastDeepLink);
 
-// Bring the main window forward — creating it only once the app is ready
-// (creating a BrowserWindow before `ready` throws).
-function focusMain(): void {
-  if (mainWin && !mainWin.isDestroyed()) {
-    if (mainWin.isMinimized()) mainWin.restore();
-    mainWin.show();
-    mainWin.focus();
+function focusAny(): void {
+  const w = onboardingWin ?? sessionWindows()[0] ?? null;
+  if (w && !w.isDestroyed()) {
+    if (w.isMinimized()) w.restore();
+    w.show();
+    w.focus();
   } else if (app.isReady()) {
-    createMainWindow();
+    createOnboardingWindow();
   }
 }
 
-// Route a deep link to the renderer. Safe to call at any time: if the app isn't
-// ready yet (macOS can deliver open-url during launch), it just stashes the URL
-// for whenReady to replay — never touches a window early.
+// Route a deep link to every window. Safe before ready (macOS open-url during
+// launch): stash it for whenReady to replay.
 function handleDeepLink(url: string): void {
   lastDeepLink = url;
   if (!app.isReady()) {
     pendingDeepLink = url;
     return;
   }
-  focusMain();
-  const wc = mainWin?.webContents;
-  if (!wc) {
-    pendingDeepLink = url;
-    return;
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed()) w.webContents.send("deep-link", url);
   }
-  if (wc.isLoading()) wc.once("did-finish-load", () => wc.send("deep-link", url));
-  else wc.send("deep-link", url);
+  focusAny();
 }
 
 // ── lifecycle ────────────────────────────────────────────────────────────────
 
-// A single instance: a second launch (e.g. from a deep link while already
-// running) focuses the existing window instead of spawning another app.
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on("second-instance", (_e, argv) => {
-    // Windows/Linux deliver the deep link as a command-line argument.
     const url = argv.find((a) => a.startsWith(`${DEEP_LINK_SCHEME}://`));
     if (url) handleDeepLink(url);
-    else focusMain();
+    else focusAny();
   });
 
-  // macOS delivers the deep link through this event.
   app.on("open-url", (event, url) => {
     event.preventDefault();
     handleDeepLink(url);
@@ -242,14 +267,13 @@ if (!app.requestSingleInstanceLock()) {
   app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME);
 
   app.whenReady().then(() => {
-    createMainWindow();
+    createOnboardingWindow();
     if (pendingDeepLink) {
-      const url = pendingDeepLink;
       pendingDeepLink = null;
-      mainWin?.webContents.once("did-finish-load", () => handleDeepLink(url));
+      // lastDeepLink already set; onboarding/brief read it via getInitialDeepLink.
     }
     app.on("activate", () => {
-      if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
+      if (BrowserWindow.getAllWindows().length === 0) createOnboardingWindow();
     });
   });
 

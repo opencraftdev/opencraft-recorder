@@ -1,32 +1,36 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
-  CaptureSource,
+  BusMessage,
   CursorInfo,
   Permissions,
+  PrimarySource,
   RecorderApi,
   SaveResult,
 } from "../shared/types";
 
-// The only surface the renderer can touch in the main process — a thin, typed
-// wrapper around IPC channels.
 const api: RecorderApi = {
-  getSources: (): Promise<CaptureSource[]> => ipcRenderer.invoke("get-sources"),
   getCursor: (): Promise<CursorInfo> => ipcRenderer.invoke("get-cursor"),
-  openCamera: (): Promise<void> => ipcRenderer.invoke("open-camera"),
-  closeCamera: (): Promise<void> => ipcRenderer.invoke("close-camera"),
+  getPrimarySource: (): Promise<PrimarySource | null> => ipcRenderer.invoke("get-primary-source"),
   saveRecording: (data: ArrayBuffer, suggestedName: string): Promise<SaveResult> =>
     ipcRenderer.invoke("save-recording", data, suggestedName),
-  onCameraClosed: (cb: () => void): (() => void) => {
-    const handler = (): void => cb();
-    ipcRenderer.on("camera-window-closed", handler);
-    return () => ipcRenderer.off("camera-window-closed", handler);
+
+  startSession: (): Promise<void> => ipcRenderer.invoke("start-session"),
+  endSession: (): Promise<void> => ipcRenderer.invoke("end-session"),
+
+  busSend: (msg: BusMessage): void => ipcRenderer.send("bus", msg),
+  busOn: (cb: (msg: BusMessage) => void): (() => void) => {
+    const handler = (_e: unknown, msg: BusMessage): void => cb(msg);
+    ipcRenderer.on("bus", handler);
+    return () => ipcRenderer.off("bus", handler);
   },
+
   getInitialDeepLink: (): Promise<string | null> => ipcRenderer.invoke("get-initial-deep-link"),
   onDeepLink: (cb: (url: string) => void): (() => void) => {
     const handler = (_e: unknown, url: string): void => cb(url);
     ipcRenderer.on("deep-link", handler);
     return () => ipcRenderer.off("deep-link", handler);
   },
+
   getPermissions: (): Promise<Permissions> => ipcRenderer.invoke("get-permissions"),
   requestCameraMic: (): Promise<boolean> => ipcRenderer.invoke("request-camera-mic"),
   openScreenSettings: (): Promise<void> => ipcRenderer.invoke("open-screen-settings"),

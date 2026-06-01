@@ -50,6 +50,10 @@ export class DesktopRecorder {
   get cameraStream(): MediaStream | null {
     return this.camStream;
   }
+  // The raw screen capture, for the live "screen record" preview popup.
+  get screenPreview(): MediaStream | null {
+    return this.screenStream;
+  }
   get hasCam(): boolean {
     return Boolean(this.camVideo && this.camVideo.videoWidth > 0);
   }

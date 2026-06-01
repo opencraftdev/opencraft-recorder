@@ -91,6 +91,35 @@ export const outlineBtn: CSSProperties = {
   fontFamily: G.font,
 };
 
+// ── spotlight popups (recording overlay) ─────────────────────────────────────
+// Frosted dark windows (macOS vibrancy provides the blur); we keep the content
+// background transparent and use light text. The whole popup is draggable; mark
+// interactive elements with `noDrag`.
+export type DraggableCSS = CSSProperties & { WebkitAppRegion?: "drag" | "no-drag" };
+
+export const popup: DraggableCSS = {
+  width: "100vw",
+  height: "100vh",
+  boxSizing: "border-box",
+  color: "#fff",
+  fontFamily: G.font,
+  background: "rgba(20,22,26,0.45)", // tint on top of the vibrancy
+  overflow: "hidden",
+  display: "flex",
+  flexDirection: "column",
+  WebkitAppRegion: "drag",
+};
+
+export const noDrag: DraggableCSS = { WebkitAppRegion: "no-drag" };
+
+export const popupLabel: CSSProperties = {
+  fontSize: 9,
+  fontWeight: 700,
+  letterSpacing: "0.1em",
+  color: "rgba(255,255,255,0.65)",
+  textTransform: "uppercase",
+};
+
 export const input: CSSProperties = {
   width: "100%",
   boxSizing: "border-box",

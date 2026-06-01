@@ -9,23 +9,20 @@ export interface Bounds {
   height: number;
 }
 
-export interface CaptureSource {
-  id: string;
-  name: string;
-  kind: "screen" | "window";
-  thumbnail: string;
-  displayBounds: Bounds | null;
-}
-
 export interface CursorInfo {
   x: number;
   y: number;
   bounds: Bounds;
 }
 
+// The primary display as a capture source.
+export interface PrimarySource {
+  id: string;
+  displayBounds: Bounds | null;
+}
+
 export type SaveResult = { saved: false } | { saved: true; filePath: string };
 
-// macOS privacy permission status (matches Electron's getMediaAccessStatus).
 export type PermissionStatus = "not-determined" | "granted" | "denied" | "restricted" | "unknown";
 
 export interface Permissions {
@@ -34,18 +31,30 @@ export interface Permissions {
   screen: PermissionStatus;
 }
 
+export type SessionPhase = "armed" | "recording" | "paused" | "done";
+
+// Messages on the cross-window bus. Control popup → engine (commands); engine →
+// everyone (state).
+export type BusMessage =
+  | { type: "cmd"; action: "record" | "pause" | "resume" | "stop" | "zoomIn" | "zoomOut" | "toggleAuto" }
+  | { type: "state"; phase: SessionPhase; elapsed: number; zoom: number; auto: boolean }
+  | { type: "saved"; ok: boolean };
+
 export interface RecorderApi {
-  getSources(): Promise<CaptureSource[]>;
+  // Capture
   getCursor(): Promise<CursorInfo>;
-  openCamera(): Promise<void>;
-  closeCamera(): Promise<void>;
+  getPrimarySource(): Promise<PrimarySource | null>;
   saveRecording(data: ArrayBuffer, suggestedName: string): Promise<SaveResult>;
-  onCameraClosed(cb: () => void): () => void;
-  // The deep link the app was launched/focused with (web → app), e.g.
-  // opencraft-recorder://record?title=…&presenter=…
+  // Session (multi-popup) lifecycle
+  startSession(): Promise<void>;
+  endSession(): Promise<void>;
+  // Cross-window bus
+  busSend(msg: BusMessage): void;
+  busOn(cb: (msg: BusMessage) => void): () => void;
+  // Deep link (web → app)
   getInitialDeepLink(): Promise<string | null>;
   onDeepLink(cb: (url: string) => void): () => void;
-  // Onboarding: macOS camera / mic / screen-recording permissions.
+  // Onboarding permissions
   getPermissions(): Promise<Permissions>;
   requestCameraMic(): Promise<boolean>;
   openScreenSettings(): Promise<void>;
