@@ -134,24 +134,34 @@ ipcMain.handle("save-recording", async (_e, data: ArrayBuffer, suggestedName: st
 const DEEP_LINK_SCHEME = "opencraft-recorder";
 let pendingDeepLink: string | null = null;
 
+// Bring the main window forward — creating it only once the app is ready
+// (creating a BrowserWindow before `ready` throws).
 function focusMain(): void {
   if (mainWin && !mainWin.isDestroyed()) {
     if (mainWin.isMinimized()) mainWin.restore();
     mainWin.show();
     mainWin.focus();
-  } else {
+  } else if (app.isReady()) {
     createMainWindow();
   }
 }
 
+// Route a deep link to the renderer. Safe to call at any time: if the app isn't
+// ready yet (macOS can deliver open-url during launch), it just stashes the URL
+// for whenReady to replay — never touches a window early.
 function handleDeepLink(url: string): void {
-  // App fully up → tell the renderer; otherwise stash until the window exists.
-  if (mainWin && !mainWin.isDestroyed() && !mainWin.webContents.isLoading()) {
-    mainWin.webContents.send("deep-link", url);
-  } else {
+  if (!app.isReady()) {
     pendingDeepLink = url;
+    return;
   }
   focusMain();
+  const wc = mainWin?.webContents;
+  if (!wc) {
+    pendingDeepLink = url;
+    return;
+  }
+  if (wc.isLoading()) wc.once("did-finish-load", () => wc.send("deep-link", url));
+  else wc.send("deep-link", url);
 }
 
 // ── lifecycle ────────────────────────────────────────────────────────────────

@@ -3,6 +3,9 @@ productName: OpenCraft Recorder
 directories:
   output: dist
   buildResources: build
+# Ad-hoc sign the .app after packing (see build/afterPack.cjs) so Gatekeeper
+# shows "unidentified developer" (right-click → Open) instead of "damaged".
+afterPack: build/afterPack.cjs
 files:
   - out/**
   - "!**/*.map"
