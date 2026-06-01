@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { DesktopRecorder, MIN_ZOOM, MAX_ZOOM } from "../lib/recorder";
+import { Onboarding } from "./Onboarding";
 import type { Bounds, CaptureSource } from "../../../shared/types";
 
-type Phase = "setup" | "armed" | "recording" | "paused" | "done";
+type Phase = "onboarding" | "setup" | "armed" | "recording" | "paused" | "done";
 
 const ZOOM_STEP = 0.5;
 
@@ -73,7 +74,7 @@ export function MainWindow(): JSX.Element {
     script: "",
   });
 
-  const [phase, setPhase] = useState<Phase>("setup");
+  const [phase, setPhase] = useState<Phase>("onboarding");
   const [zoom, setZoom] = useState(1);
   const [auto, setAuto] = useState(true);
   const [elapsed, setElapsed] = useState(0);
@@ -252,6 +253,10 @@ export function MainWindow(): JSX.Element {
     gap: 12,
   };
   const label: CSSProperties = { fontSize: 11, fontWeight: 700, color: C.sub, letterSpacing: "0.06em" };
+
+  if (phase === "onboarding") {
+    return <Onboarding onDone={() => setPhase("setup")} />;
+  }
 
   return (
     <div style={wrap}>

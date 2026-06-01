@@ -1,4 +1,13 @@
-import { app, BrowserWindow, ipcMain, desktopCapturer, screen, dialog } from "electron";
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  desktopCapturer,
+  screen,
+  dialog,
+  systemPreferences,
+  shell,
+} from "electron";
 import { join } from "path";
 import { writeFile } from "fs/promises";
 
@@ -125,6 +134,46 @@ ipcMain.handle("save-recording", async (_e, data: ArrayBuffer, suggestedName: st
   if (canceled || !filePath) return { saved: false as const };
   await writeFile(filePath, Buffer.from(data));
   return { saved: true as const, filePath };
+});
+
+// ── onboarding: macOS privacy permissions ───────────────────────────────────
+
+// Live status of the permissions we need. On non-macOS there's nothing to grant.
+ipcMain.handle("get-permissions", () => {
+  if (process.platform !== "darwin") {
+    return { camera: "granted", microphone: "granted", screen: "granted" };
+  }
+  return {
+    camera: systemPreferences.getMediaAccessStatus("camera"),
+    microphone: systemPreferences.getMediaAccessStatus("microphone"),
+    screen: systemPreferences.getMediaAccessStatus("screen"),
+  };
+});
+
+// Camera + mic can be requested with a native prompt directly.
+ipcMain.handle("request-camera-mic", async () => {
+  if (process.platform !== "darwin") return true;
+  const cam = await systemPreferences.askForMediaAccess("camera");
+  const mic = await systemPreferences.askForMediaAccess("microphone");
+  return cam && mic;
+});
+
+// Screen Recording can't be requested via a prompt — poke the OS so the app is
+// listed, then open the Screen Recording settings pane for the user to toggle.
+ipcMain.handle("open-screen-settings", () => {
+  if (process.platform !== "darwin") return;
+  desktopCapturer
+    .getSources({ types: ["screen"], thumbnailSize: { width: 1, height: 1 } })
+    .catch(() => {});
+  void shell.openExternal(
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+  );
+});
+
+// Screen Recording only takes effect after a relaunch — offer a one-click restart.
+ipcMain.handle("relaunch-app", () => {
+  app.relaunch();
+  app.exit(0);
 });
 
 // ── deep linking (web → app) ─────────────────────────────────────────────────

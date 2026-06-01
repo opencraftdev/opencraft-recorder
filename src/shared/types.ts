@@ -25,6 +25,15 @@ export interface CursorInfo {
 
 export type SaveResult = { saved: false } | { saved: true; filePath: string };
 
+// macOS privacy permission status (matches Electron's getMediaAccessStatus).
+export type PermissionStatus = "not-determined" | "granted" | "denied" | "restricted" | "unknown";
+
+export interface Permissions {
+  camera: PermissionStatus;
+  microphone: PermissionStatus;
+  screen: PermissionStatus;
+}
+
 export interface RecorderApi {
   getSources(): Promise<CaptureSource[]>;
   getCursor(): Promise<CursorInfo>;
@@ -36,4 +45,9 @@ export interface RecorderApi {
   // opencraft-recorder://record?title=…&presenter=…
   getInitialDeepLink(): Promise<string | null>;
   onDeepLink(cb: (url: string) => void): () => void;
+  // Onboarding: macOS camera / mic / screen-recording permissions.
+  getPermissions(): Promise<Permissions>;
+  requestCameraMic(): Promise<boolean>;
+  openScreenSettings(): Promise<void>;
+  relaunchApp(): Promise<void>;
 }

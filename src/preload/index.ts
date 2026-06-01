@@ -1,5 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { CaptureSource, CursorInfo, RecorderApi, SaveResult } from "../shared/types";
+import type {
+  CaptureSource,
+  CursorInfo,
+  Permissions,
+  RecorderApi,
+  SaveResult,
+} from "../shared/types";
 
 // The only surface the renderer can touch in the main process — a thin, typed
 // wrapper around IPC channels.
@@ -21,6 +27,10 @@ const api: RecorderApi = {
     ipcRenderer.on("deep-link", handler);
     return () => ipcRenderer.off("deep-link", handler);
   },
+  getPermissions: (): Promise<Permissions> => ipcRenderer.invoke("get-permissions"),
+  requestCameraMic: (): Promise<boolean> => ipcRenderer.invoke("request-camera-mic"),
+  openScreenSettings: (): Promise<void> => ipcRenderer.invoke("open-screen-settings"),
+  relaunchApp: (): Promise<void> => ipcRenderer.invoke("relaunch-app"),
 };
 
 contextBridge.exposeInMainWorld("api", api);
