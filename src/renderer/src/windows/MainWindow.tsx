@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { DesktopRecorder, MIN_ZOOM, MAX_ZOOM } from "../lib/recorder";
-import { PRESENTERS, SAMPLE_SCRIPT, type Script } from "../data";
 import type { Bounds, CaptureSource } from "../../../shared/types";
 
 type Phase = "setup" | "armed" | "recording" | "paused" | "done";
@@ -17,10 +16,27 @@ const C = {
   line: "#2d3137",
 };
 
-function flattenScript(s: Script): string {
-  return [s.hook, ...s.segments.map((seg) => `${seg.title}\n${seg.narration}`), s.outro]
-    .filter(Boolean)
-    .join("\n\n");
+// What the web app chose, carried in the launch deep link. The desktop app is a
+// pure recorder — it never asks for these.
+interface RecordingMeta {
+  title: string;
+  presenterName: string;
+  presenterHandle: string;
+  script: string;
+}
+
+function parseDeepLink(url: string): RecordingMeta | null {
+  try {
+    const p = new URL(url).searchParams;
+    return {
+      title: p.get("title") ?? "",
+      presenterName: p.get("presenter") ?? "",
+      presenterHandle: p.get("handle") ?? "",
+      script: p.get("script") ?? "",
+    };
+  } catch {
+    return null;
+  }
 }
 
 function fmtClock(sec: number): string {
@@ -50,8 +66,12 @@ const ghostBtn: CSSProperties = {
 export function MainWindow(): JSX.Element {
   const [sources, setSources] = useState<CaptureSource[]>([]);
   const [sel, setSel] = useState<string>("");
-  const [presenterId, setPresenterId] = useState(PRESENTERS[0].id);
-  const [script, setScript] = useState(flattenScript(SAMPLE_SCRIPT));
+  const [meta, setMeta] = useState<RecordingMeta>({
+    title: "",
+    presenterName: "",
+    presenterHandle: "",
+    script: "",
+  });
 
   const [phase, setPhase] = useState<Phase>("setup");
   const [zoom, setZoom] = useState(1);
@@ -77,6 +97,19 @@ export function MainWindow(): JSX.Element {
     });
     const off = window.api.onCameraClosed(() => setCamOpen(false));
     return off;
+  }, []);
+
+  // The recording's title/presenter/script come from the web app via the launch
+  // deep link — read it on mount and keep listening for later ones.
+  useEffect(() => {
+    void window.api.getInitialDeepLink().then((url) => {
+      const m = url ? parseDeepLink(url) : null;
+      if (m) setMeta(m);
+    });
+    return window.api.onDeepLink((url) => {
+      const m = parseDeepLink(url);
+      if (m) setMeta(m);
+    });
   }, []);
 
   // Push zoom/auto into the recorder live.
@@ -219,16 +252,6 @@ export function MainWindow(): JSX.Element {
     gap: 12,
   };
   const label: CSSProperties = { fontSize: 11, fontWeight: 700, color: C.sub, letterSpacing: "0.06em" };
-  const field: CSSProperties = {
-    width: "100%",
-    background: C.panel,
-    color: C.text,
-    border: `1px solid ${C.line}`,
-    borderRadius: 8,
-    padding: "8px 10px",
-    fontSize: 13,
-    fontFamily: "inherit",
-  };
 
   return (
     <div style={wrap}>
@@ -245,8 +268,21 @@ export function MainWindow(): JSX.Element {
 
       {phase === "setup" && (
         <>
+          {/* Read-only — the web app chose this. No forms here. */}
+          <div style={{ background: C.panel, borderRadius: 10, padding: 12 }}>
+            <span style={label}>RECORDING</span>
+            <div style={{ fontSize: 15, fontWeight: 700, marginTop: 4 }}>
+              {meta.title || "Untitled recording"}
+            </div>
+            <div style={{ fontSize: 12, color: C.sub, marginTop: 2 }}>
+              {meta.presenterName
+                ? `${meta.presenterName}${meta.presenterHandle ? ` · ${meta.presenterHandle}` : ""}`
+                : "Open from the web app to set the title & presenter"}
+            </div>
+          </div>
+
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <span style={label}>SOURCE</span>
+            <span style={label}>CHOOSE WHAT TO RECORD</span>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, maxHeight: 220, overflowY: "auto" }}>
               {sources.map((s) => (
                 <button
@@ -271,26 +307,6 @@ export function MainWindow(): JSX.Element {
                 </button>
               ))}
             </div>
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <span style={label}>PRESENTER</span>
-            <select style={field} value={presenterId} onChange={(e) => setPresenterId(e.target.value)}>
-              {PRESENTERS.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} · {p.handle}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <span style={label}>SCRIPT (teleprompter)</span>
-            <textarea
-              style={{ ...field, minHeight: 120, resize: "vertical", lineHeight: 1.5 }}
-              value={script}
-              onChange={(e) => setScript(e.target.value)}
-            />
           </div>
 
           <button style={btn(C.blue)} onClick={() => void start()} disabled={!sel}>
@@ -365,22 +381,24 @@ export function MainWindow(): JSX.Element {
             )}
           </div>
 
-          {/* Teleprompter */}
-          <div
-            style={{
-              flex: 1,
-              minHeight: 120,
-              overflowY: "auto",
-              background: C.panel,
-              borderRadius: 10,
-              padding: 12,
-              fontSize: 15,
-              lineHeight: 1.6,
-              whiteSpace: "pre-wrap",
-            }}
-          >
-            {script}
-          </div>
+          {/* Teleprompter — only when the web app sent a script. */}
+          {meta.script && (
+            <div
+              style={{
+                flex: 1,
+                minHeight: 120,
+                overflowY: "auto",
+                background: C.panel,
+                borderRadius: 10,
+                padding: 12,
+                fontSize: 15,
+                lineHeight: 1.6,
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              {meta.script}
+            </div>
+          )}
         </>
       )}
 

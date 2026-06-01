@@ -15,6 +15,12 @@ const api: RecorderApi = {
     ipcRenderer.on("camera-window-closed", handler);
     return () => ipcRenderer.off("camera-window-closed", handler);
   },
+  getInitialDeepLink: (): Promise<string | null> => ipcRenderer.invoke("get-initial-deep-link"),
+  onDeepLink: (cb: (url: string) => void): (() => void) => {
+    const handler = (_e: unknown, url: string): void => cb(url);
+    ipcRenderer.on("deep-link", handler);
+    return () => ipcRenderer.off("deep-link", handler);
+  },
 };
 
 contextBridge.exposeInMainWorld("api", api);

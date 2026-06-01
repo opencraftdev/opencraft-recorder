@@ -32,4 +32,8 @@ export interface RecorderApi {
   closeCamera(): Promise<void>;
   saveRecording(data: ArrayBuffer, suggestedName: string): Promise<SaveResult>;
   onCameraClosed(cb: () => void): () => void;
+  // The deep link the app was launched/focused with (web → app), e.g.
+  // opencraft-recorder://record?title=…&presenter=…
+  getInitialDeepLink(): Promise<string | null>;
+  onDeepLink(cb: (url: string) => void): () => void;
 }
