@@ -16,6 +16,17 @@ import { writeFile } from "fs/promises";
 // macOS, WDA_EXCLUDEFROMCAPTURE on Windows 11). The window stays fully visible on
 // screen but is INVISIBLE to any screen recording. Every floating popup below is
 // content-protected, so none of them appear in the take.
+//
+// macOS 15+ caveat: Chromium's modern desktop capturer uses ScreenCaptureKit,
+// which DELIBERATELY ignores NSWindowSharingNone — so our content-protected
+// popups would still show up in our OWN recording. We capture the screen
+// ourselves (desktopCapturer, see recorder.ts), so we force Chromium back onto
+// the legacy CoreGraphics capturer, which DOES honor content protection. Result:
+// the popups stay excluded from the recorded output. Must run before app "ready".
+// (electron/electron#31787, #46539)
+if (process.platform === "darwin") {
+  app.commandLine.appendSwitch("disable-features", "IOSurfaceCapturer,DesktopCaptureMacV2");
+}
 
 const PRELOAD = join(__dirname, "../preload/index.js");
 
