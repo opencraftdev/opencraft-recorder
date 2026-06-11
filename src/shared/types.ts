@@ -31,6 +31,35 @@ export interface Permissions {
   screen: PermissionStatus;
 }
 
+// ── news brief (web → app teleprompter) ──────────────────────────────────────
+// Mirrors the subset of opencraft-centralized's NewsBriefRow that the recorder
+// needs to drive the teleprompter. The web app sends a briefId + token in the
+// launch deep link; the brief window fetches the full row from
+// GET {api}/api/tutorial-video/brief/{id}?t={token}.
+
+export interface BriefScriptSegment {
+  title: string;
+  narration: string;
+  seconds: number;
+}
+
+export interface BriefScript {
+  hook: string;
+  segments: BriefScriptSegment[];
+  outro: string;
+  total_words?: number;
+  est_seconds?: number;
+}
+
+export interface RecorderBrief {
+  id: string;
+  title: string | null;
+  presenter_name: string | null;
+  script: BriefScript;
+  thumbnail?: { headline?: string; subtext?: string } | null;
+  est_seconds?: number | null;
+}
+
 export type SessionPhase = "armed" | "recording" | "paused" | "done";
 
 // Messages on the cross-window bus. Control popup → engine (commands); engine →
